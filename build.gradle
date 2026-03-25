@@ -1,0 +1,311 @@
+plugins {
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+group = 'info.akb21'
+version = '0.1.3'
+
+def appName = 'ofd2pdf'
+def appDisplayName = 'OFD 转 PDF'
+def appVendor = 'AKB21'
+def appDescription = '桌面版 OFD 转 PDF 工具'
+def windowsMenuGroup = 'AKB21'
+def linuxPackageName = 'ofd2pdf'
+def linuxAppCategory = 'Office'
+def packageDate = new Date().format('yyyyMMdd')
+def packagePlatform = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'windows'
+        : org.gradle.internal.os.OperatingSystem.current().isLinux() ? 'linux'
+        : 'unknown'
+def packageArch = {
+    def arch = System.getProperty('os.arch', '').toLowerCase(Locale.ROOT)
+    if (arch in ['x86_64', 'amd64']) {
+        return 'x64'
+    }
+    if (arch in ['aarch64', 'arm64']) {
+        return 'arm64'
+    }
+    return arch.replaceAll(/[^a-z0-9]+/, '-')
+}.call()
+def mainJarName = "${appName}-${version}.jar"
+def packageInputDir = layout.buildDirectory.dir('jpackage/input')
+def packageDestDir = layout.buildDirectory.dir('jpackage/package')
+def noRuntimeDestDir = layout.buildDirectory.dir('package-no-runtime')
+def runtimeModulesFile = layout.buildDirectory.file('jpackage/runtime-modules.txt')
+def windowsResourceDir = layout.buildDirectory.dir('jpackage/windows-resources')
+def windowsIconFile = layout.projectDirectory.file('packaging/assets/app.ico').asFile
+def linuxIconFile = layout.projectDirectory.file('packaging/assets/app.png').asFile
+def jpackageJlinkOptions = '--strip-debug --no-header-files --no-man-pages --strip-native-commands --compress=zip-6'
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    junitVersion = '5.10.2'
+    slf4jVersion = '2.0.13'
+    logbackVersion = '1.5.6'
+    ofdrwVersion = '2.3.8'
+    javafxVersion = '25.0.2'
+}
+
+application {
+    mainClass = 'info.akb21.ofd2pdf.launcher.AppLauncher'
+    applicationName = appName
+}
+
+distributions {
+    main {
+        contents {
+            from('LICENSE')
+            from('packaging/assets/ofdrw_LICENSE') {
+                into 'third-party-licenses'
+            }
+        }
+    }
+}
+
+javafx {
+    version = javafxVersion
+    modules = ['javafx.controls', 'javafx.graphics']
+}
+
+dependencies {
+    implementation("org.ofdrw:ofdrw-converter:${ofdrwVersion}") {
+        exclude group: 'xml-apis', module: 'xml-apis'
+        exclude group: 'xpp3', module: 'xpp3'
+        exclude group: 'stax', module: 'stax-api'
+    }
+    implementation "org.slf4j:slf4j-api:${slf4jVersion}"
+    runtimeOnly "ch.qos.logback:logback-classic:${logbackVersion}"
+
+    testImplementation platform("org.junit:junit-bom:${junitVersion}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+def toUnicodeEscapedPropertiesValue = { String value ->
+    value.collect { ch ->
+        int codePoint = (int) ch
+        if (codePoint >= 0x20 && codePoint <= 0x7E && ch != '\\') {
+            return ch.toString()
+        }
+        if (ch == '\\') {
+            return '\\\\'
+        }
+        return String.format('\\u%04X', codePoint)
+    }.join('')
+}
+
+def toWindowsFixedFileVersion = { String versionText ->
+    def components = versionText.tokenize('.').collect { token ->
+        token.isInteger() ? Integer.parseInt(token) : 0
+    }
+    while (components.size() < 4) {
+        components << 0
+    }
+    return components.take(4).join('.')
+}
+
+tasks.named('jar') {
+    archiveBaseName.set(appName)
+}
+
+tasks.register('prepareJpackageInput', Sync) {
+    dependsOn tasks.named('jar')
+    from(tasks.named('jar'))
+    from(configurations.runtimeClasspath) {
+        exclude('**/xml-apis-*.jar')
+        exclude('**/xpp3-*.jar')
+        exclude('**/stax-api-*.jar')
+    }
+    from('packaging/assets/ofdrw_LICENSE') {
+        into 'third-party-licenses'
+    }
+    into(packageInputDir)
+}
+
+tasks.register('prepareWindowsJpackageResources') {
+    group = 'distribution'
+    description = 'Generate Windows-specific jpackage resource overrides.'
+    outputs.dir(windowsResourceDir)
+
+    doLast {
+        def resourceDir = windowsResourceDir.get().asFile
+        def launcherPropertiesFile = new File(resourceDir, "${appName}.properties")
+        def fixedFileVersion = toWindowsFixedFileVersion(project.version.toString())
+
+        resourceDir.mkdirs()
+        launcherPropertiesFile.text = """\
+FIXEDFILEINFO_FileVersion=${fixedFileVersion}
+FIXEDFILEINFO_ProductVersion=${fixedFileVersion}
+CompanyName=${toUnicodeEscapedPropertiesValue(appVendor)}
+FileDescription=${toUnicodeEscapedPropertiesValue(appDescription)}
+FileVersion=${toUnicodeEscapedPropertiesValue(project.version.toString())}
+InternalName=${toUnicodeEscapedPropertiesValue("${appName}.exe")}
+LegalCopyright=
+OriginalFilename=${toUnicodeEscapedPropertiesValue("${appName}.exe")}
+ProductName=${toUnicodeEscapedPropertiesValue(appDisplayName)}
+ProductVersion=${toUnicodeEscapedPropertiesValue(project.version.toString())}
+""".stripIndent()
+    }
+}
+
+tasks.register('packageNoRuntimeZip', Copy) {
+    group = 'distribution'
+    description = 'Build a lightweight zip distribution that requires a system-installed Java runtime.'
+    dependsOn tasks.named('distZip')
+
+    from(tasks.named('distZip'))
+    into(noRuntimeDestDir)
+    rename { "${appName}-${project.version}-no-runtime-${packageDate}.zip" }
+}
+
+tasks.register('calculateRuntimeModules') {
+    group = 'distribution'
+    description = 'Analyze application dependencies with jdeps and generate the minimal JDK module list for jpackage.'
+    dependsOn tasks.named('prepareJpackageInput')
+    outputs.file(runtimeModulesFile)
+
+    doLast {
+        def inputDir = packageInputDir.get().asFile
+        def mainJar = new File(inputDir, mainJarName)
+        def classpathJars = (inputDir.listFiles() ?: [])
+                .findAll { it.name.endsWith('.jar') && it.name != mainJarName }
+        def runtimeModulesOutput = runtimeModulesFile.get().asFile
+
+        runtimeModulesOutput.parentFile.mkdirs()
+
+        def jdepsOutputProperty = 'jdeps.runtime.modules'
+        ant.exec(
+                executable: 'jdeps',
+                failonerror: true,
+                outputproperty: jdepsOutputProperty
+        ) {
+            arg(value: '--multi-release')
+            arg(value: JavaVersion.current().majorVersion)
+            arg(value: '--ignore-missing-deps')
+            arg(value: '--recursive')
+            arg(value: '--print-module-deps')
+            arg(value: '--class-path')
+            arg(value: classpathJars.collect { it.absolutePath }.join(File.pathSeparator))
+            arg(value: mainJar.absolutePath)
+        }
+
+        def rawJdepsOutput = ant.project.properties[jdepsOutputProperty]?.trim()
+        def detectedModules = rawJdepsOutput
+                ?.readLines()
+                ?.collect { it.trim() }
+                ?.findAll { it && !it.startsWith('Warning:') }
+                ?.find { it ==~ /[A-Za-z0-9.,_-]+/ }
+
+        if (!detectedModules) {
+            throw new GradleException("jdeps did not return a valid runtime module list for ${mainJar.name}. Raw output: ${rawJdepsOutput}")
+        }
+
+        runtimeModulesOutput.text = detectedModules + System.lineSeparator()
+        logger.lifecycle("Detected runtime modules: ${detectedModules}")
+    }
+}
+
+tasks.register('packageWindows', Exec) {
+    group = 'distribution'
+    description = 'Build a Windows installer with jpackage.'
+    dependsOn tasks.named('calculateRuntimeModules'), tasks.named('prepareWindowsJpackageResources')
+    onlyIf {
+        org.gradle.internal.os.OperatingSystem.current().isWindows()
+    }
+
+    doFirst {
+        def outputDir = packageDestDir.get().asFile
+        def runtimeModules = runtimeModulesFile.get().asFile.text.trim()
+        outputDir.mkdirs()
+        commandLine(
+                'jpackage',
+                '--type', 'exe',
+                '--dest', outputDir.absolutePath,
+                '--input', packageInputDir.get().asFile.absolutePath,
+                '--name', appName,
+                '--app-version', project.version.toString(),
+                '--main-jar', mainJarName,
+                '--main-class', application.mainClass.get(),
+                '--java-options', '-Dfile.encoding=UTF-8',
+                '--vendor', appVendor,
+                '--resource-dir', windowsResourceDir.get().asFile.absolutePath,
+                '--win-shortcut',
+                '--win-menu',
+                '--win-menu-group', windowsMenuGroup,
+                '--description', appDescription,
+                '--add-modules', runtimeModules,
+                '--jlink-options', jpackageJlinkOptions
+        )
+        if (windowsIconFile.exists()) {
+            commandLine += ['--icon', windowsIconFile.absolutePath]
+        }
+    }
+
+    doLast {
+        def outputDir = packageDestDir.get().asFile
+        def originalFile = new File(outputDir, "${appName}-${project.version}.exe")
+        def renamedFile = new File(outputDir, "${appName}-${project.version}-${packagePlatform}-${packageArch}-${packageDate}.exe")
+        if (originalFile.exists() && !originalFile.equals(renamedFile)) {
+            originalFile.renameTo(renamedFile)
+        }
+    }
+}
+
+tasks.register('packageDeb', Exec) {
+    group = 'distribution'
+    description = 'Build a Linux .deb package with jpackage.'
+    dependsOn tasks.named('calculateRuntimeModules')
+    onlyIf {
+        org.gradle.internal.os.OperatingSystem.current().isLinux()
+    }
+
+    doFirst {
+        def outputDir = packageDestDir.get().asFile
+        def runtimeModules = runtimeModulesFile.get().asFile.text.trim()
+        outputDir.mkdirs()
+        commandLine(
+                'jpackage',
+                '--type', 'deb',
+                '--dest', outputDir.absolutePath,
+                '--input', packageInputDir.get().asFile.absolutePath,
+                '--name', appName,
+                '--app-version', project.version.toString(),
+                '--main-jar', mainJarName,
+                '--main-class', application.mainClass.get(),
+                '--java-options', '-Dfile.encoding=UTF-8',
+                '--vendor', appVendor,
+                '--linux-shortcut',
+                '--linux-package-name', linuxPackageName,
+                '--linux-app-category', linuxAppCategory,
+                '--description', appDescription,
+                '--add-modules', runtimeModules,
+                '--jlink-options', jpackageJlinkOptions
+        )
+        if (linuxIconFile.exists()) {
+            commandLine += ['--icon', linuxIconFile.absolutePath]
+        }
+    }
+
+    doLast {
+        def outputDir = packageDestDir.get().asFile
+        def candidates = outputDir.listFiles()?.findAll { file -> file.name.endsWith('.deb') } ?: []
+        candidates.each { file ->
+            def renamed = "${appName}-${project.version}-${packagePlatform}-${packageArch}-${packageDate}.deb"
+            def renamedFile = new File(outputDir, renamed)
+            if (!file.equals(renamedFile)) {
+                file.renameTo(renamedFile)
+            }
+        }
+    }
+}

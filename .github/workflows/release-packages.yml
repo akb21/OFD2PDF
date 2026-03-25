@@ -1,0 +1,105 @@
+name: Release Packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x64
+            runner: windows-2025
+            task: packageWindows
+            artifact_name: windows-x64
+            package_glob: build/jpackage/package/*.exe
+            java_arch: x64
+            java_distribution: microsoft
+            build_command: .\gradlew.bat --no-daemon clean packageWindows
+          - label: linux-x64
+            runner: ubuntu-24.04
+            task: packageDeb
+            artifact_name: linux-x64
+            package_glob: build/jpackage/package/*.deb
+            java_arch: x64
+            java_distribution: microsoft
+            build_command: ./gradlew --no-daemon clean packageDeb
+          - label: linux-arm64
+            runner: ubuntu-24.04-arm
+            task: packageDeb
+            artifact_name: linux-arm64
+            package_glob: build/jpackage/package/*.deb
+            java_arch: aarch64
+            java_distribution: microsoft
+            build_command: ./gradlew --no-daemon clean packageDeb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: ${{ matrix.java_distribution }}
+          java-version: "25"
+          architecture: ${{ matrix.java_arch }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Ensure Gradle wrapper is executable
+        if: runner.os != 'Windows'
+        shell: bash
+        run: chmod +x ./gradlew
+
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot
+
+      - name: Build package on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ${{ matrix.build_command }}
+
+      - name: Build package on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ${{ matrix.build_command }}
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          if-no-files-found: error
+          path: ${{ matrix.package_glob }}
+
+  release:
+    name: Publish Release
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/windows-x64/*
+            release-assets/linux-x64/*
+            release-assets/linux-arm64/*

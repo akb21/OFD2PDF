@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Gradle
+/.gradle/
+/.gradle-home/
+/build/
+
+# Java / JVM
+hs_err_pid*
+replay_pid*
+*.log
+
+# IDE
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.vscode/
+
+# Packaging outputs
+/dist/
+/out/
+
+# Runtime temp files
+*.tmp
+*.temp
+
+# Editor / patch temp files
+*.swp
+*.swo
+*~
+*.orig
+*.rej
