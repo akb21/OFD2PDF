@@ -30,6 +30,12 @@
 ./gradlew packageDeb
 ```
 
+构建 Linux app image（`packageDeb` 复用它来打包）：
+
+```bash
+./gradlew packageAppImage
+```
+
 构建不带 Java 运行时的轻量版压缩包：
 
 ```bash
@@ -67,7 +73,7 @@ Linux：
 轻量版：
 - `.zip`
 
-说明：
+- `packageDeb` 现在会先运行 `packageAppImage` 生成 `app-image`、再复用它构建 `.deb`，同时用兼容形式写入 `Depends`（`libasound2 | libasound2t64` 等），避免旧版 Debian/Ubuntu 报缺失包的问题。
 - `jpackage` 产物默认自带 Java 运行时。
 - 轻量版不使用 `jpackage`，而是使用 Gradle `application` 分发包，因此要求目标机器已安装 `OpenJDK 25` 并可通过 `java` 命令启动。
 

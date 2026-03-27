@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'info.akb21'
-version = '0.1.3'
+version = '0.1.4'
 
 def appName = 'ofd2pdf'
 def appDisplayName = 'OFD 转 PDF'
@@ -35,6 +35,7 @@ def runtimeModulesFile = layout.buildDirectory.file('jpackage/runtime-modules.tx
 def windowsResourceDir = layout.buildDirectory.dir('jpackage/windows-resources')
 def windowsIconFile = layout.projectDirectory.file('packaging/assets/app.ico').asFile
 def linuxIconFile = layout.projectDirectory.file('packaging/assets/app.png').asFile
+def linuxAppImageDir = layout.buildDirectory.dir('jpackage/app-image')
 def jpackageJlinkOptions = '--strip-debug --no-header-files --no-man-pages --strip-native-commands --compress=zip-6'
 
 repositories {
@@ -115,6 +116,109 @@ def toWindowsFixedFileVersion = { String versionText ->
     return components.take(4).join('.')
 }
 
+def normalizeDebianDepends = { String dependsValue ->
+    dependsValue.split(/\s*,\s*/).collect { dependencyGroup ->
+        dependencyGroup.split(/\s*\|\s*/).collect { alternative ->
+            def matcher = alternative =~ /^\s*([a-z0-9][a-z0-9+.-]*?)t64((?::[a-z0-9-]+)?)(\s*\([^)]*\))?\s*$/
+            if (!matcher.matches()) {
+                return alternative.trim()
+            }
+
+            def basePackage = matcher[0][1]
+            def architectureQualifier = matcher[0][2] ?: ''
+            def versionConstraint = matcher[0][3] ?: ''
+            return "${basePackage}${architectureQualifier}${versionConstraint} | ${basePackage}t64${architectureQualifier}${versionConstraint}"
+        }.join(' | ')
+    }.join(', ')
+}
+
+def normalizeDebPackageDependencies = { File debFile ->
+    def tempRoot = new File(buildDir, "tmp/deb-normalize/${debFile.name}")
+    def extractDir = new File(tempRoot, 'extract')
+    def rebuiltDir = new File(tempRoot, 'rebuilt')
+    def controlFile = new File(extractDir, 'DEBIAN/control')
+
+    project.delete(tempRoot)
+    extractDir.mkdirs()
+    rebuiltDir.mkdirs()
+
+    project.exec {
+        commandLine('dpkg-deb', '-R', debFile.absolutePath, extractDir.absolutePath)
+    }
+
+    if (!controlFile.exists()) {
+        throw new GradleException("Missing DEBIAN/control in extracted package ${debFile.name}")
+    }
+
+    def originalControl = controlFile.getText('UTF-8')
+    def normalizedControl = originalControl.replaceFirst(/(?m)^Depends:\s*(.+)$/, { fullMatch, dependsValue ->
+        "Depends: ${normalizeDebianDepends(dependsValue)}"
+    })
+
+    if (normalizedControl != originalControl) {
+        controlFile.setText(normalizedControl, 'UTF-8')
+        logger.lifecycle("Normalized Debian runtime dependencies for ${debFile.name}")
+    }
+
+    def rebuiltFile = new File(rebuiltDir, debFile.name)
+    project.exec {
+        commandLine('dpkg-deb', '-b', extractDir.absolutePath, rebuiltFile.absolutePath)
+    }
+
+    project.delete(debFile)
+    project.copy {
+        from(rebuiltFile)
+        into(debFile.parentFile)
+    }
+}
+
+def linuxAppImageArgs = { File destDir, String runtimeModules ->
+    def args = [
+            'jpackage',
+            '--type', 'app-image',
+            '--dest', destDir.absolutePath,
+            '--input', packageInputDir.get().asFile.absolutePath,
+            '--name', appName,
+            '--app-version', project.version.toString(),
+            '--main-jar', mainJarName,
+            '--main-class', application.mainClass.get(),
+            '--java-options', '-Dfile.encoding=UTF-8',
+            '--vendor', appVendor,
+            '--description', appDescription,
+            '--add-modules', runtimeModules,
+            '--jlink-options', jpackageJlinkOptions
+    ]
+    if (linuxIconFile.exists()) {
+        args += ['--icon', linuxIconFile.absolutePath]
+    }
+    args
+}
+
+def linuxDebFromAppImageArgs = { File destDir, File appImageDir ->
+    def args = [
+            'jpackage',
+            '--type', 'deb',
+            '--dest', destDir.absolutePath,
+            '--app-image', appImageDir.absolutePath,
+            '--name', appName,
+            '--app-version', project.version.toString(),
+            '--java-options', '-Dfile.encoding=UTF-8',
+            '--vendor', appVendor,
+            '--linux-shortcut',
+            '--linux-package-name', linuxPackageName,
+            '--linux-app-category', linuxAppCategory,
+            '--description', appDescription
+    ]
+    if (linuxIconFile.exists()) {
+        args += ['--icon', linuxIconFile.absolutePath]
+    }
+    args
+}
+
+def locateAppImage = { File baseDir ->
+    baseDir.listFiles()?.findAll { it.directory && it.name.startsWith(appName) }?.max { it.lastModified() }
+}
+
 tasks.named('jar') {
     archiveBaseName.set(appName)
 }
@@ -167,6 +271,22 @@ tasks.register('packageNoRuntimeZip', Copy) {
     from(tasks.named('distZip'))
     into(noRuntimeDestDir)
     rename { "${appName}-${project.version}-no-runtime-${packageDate}.zip" }
+}
+
+tasks.register('packageAppImage', Exec) {
+    group = 'distribution'
+    description = 'Build a Linux app image that bundles the runtime.'
+    dependsOn tasks.named('calculateRuntimeModules')
+    onlyIf {
+        org.gradle.internal.os.OperatingSystem.current().isLinux()
+    }
+
+    doFirst {
+        def destDir = linuxAppImageDir.get().asFile
+        def runtimeModules = runtimeModulesFile.get().asFile.text.trim()
+        destDir.mkdirs()
+        commandLine = linuxAppImageArgs(destDir, runtimeModules)
+    }
 }
 
 tasks.register('calculateRuntimeModules') {
@@ -266,35 +386,19 @@ tasks.register('packageDeb', Exec) {
     group = 'distribution'
     description = 'Build a Linux .deb package with jpackage.'
     dependsOn tasks.named('calculateRuntimeModules')
+    dependsOn tasks.named('packageAppImage')
     onlyIf {
         org.gradle.internal.os.OperatingSystem.current().isLinux()
     }
 
     doFirst {
         def outputDir = packageDestDir.get().asFile
-        def runtimeModules = runtimeModulesFile.get().asFile.text.trim()
         outputDir.mkdirs()
-        commandLine(
-                'jpackage',
-                '--type', 'deb',
-                '--dest', outputDir.absolutePath,
-                '--input', packageInputDir.get().asFile.absolutePath,
-                '--name', appName,
-                '--app-version', project.version.toString(),
-                '--main-jar', mainJarName,
-                '--main-class', application.mainClass.get(),
-                '--java-options', '-Dfile.encoding=UTF-8',
-                '--vendor', appVendor,
-                '--linux-shortcut',
-                '--linux-package-name', linuxPackageName,
-                '--linux-app-category', linuxAppCategory,
-                '--description', appDescription,
-                '--add-modules', runtimeModules,
-                '--jlink-options', jpackageJlinkOptions
-        )
-        if (linuxIconFile.exists()) {
-            commandLine += ['--icon', linuxIconFile.absolutePath]
+        def appImageDirFile = locateAppImage(linuxAppImageDir.get().asFile)
+        if (!appImageDirFile) {
+            throw new GradleException("App image directory not found under ${linuxAppImageDir.get().asFile}")
         }
+        commandLine = linuxDebFromAppImageArgs(outputDir, appImageDirFile)
     }
 
     doLast {
@@ -306,6 +410,11 @@ tasks.register('packageDeb', Exec) {
             if (!file.equals(renamedFile)) {
                 file.renameTo(renamedFile)
             }
+        }
+
+        def normalizedCandidates = outputDir.listFiles()?.findAll { file -> file.name.endsWith('.deb') } ?: []
+        normalizedCandidates.each { debFile ->
+            normalizeDebPackageDependencies(debFile)
         }
     }
 }
