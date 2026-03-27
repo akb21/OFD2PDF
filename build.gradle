@@ -3,6 +3,8 @@ plugins {
     id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
+import org.gradle.process.ExecOperations
+
 group = 'info.akb21'
 version = '0.1.4'
 
@@ -37,6 +39,7 @@ def windowsIconFile = layout.projectDirectory.file('packaging/assets/app.ico').a
 def linuxIconFile = layout.projectDirectory.file('packaging/assets/app.png').asFile
 def linuxAppImageDir = layout.buildDirectory.dir('jpackage/app-image')
 def jpackageJlinkOptions = '--strip-debug --no-header-files --no-man-pages --strip-native-commands --compress=zip-6'
+def execOperations = services.get(ExecOperations)
 
 repositories {
     mavenCentral()
@@ -142,7 +145,7 @@ def normalizeDebPackageDependencies = { File debFile ->
     extractDir.mkdirs()
     rebuiltDir.mkdirs()
 
-    project.exec {
+    execOperations.exec {
         commandLine('dpkg-deb', '-R', debFile.absolutePath, extractDir.absolutePath)
     }
 
@@ -161,7 +164,7 @@ def normalizeDebPackageDependencies = { File debFile ->
     }
 
     def rebuiltFile = new File(rebuiltDir, debFile.name)
-    project.exec {
+    execOperations.exec {
         commandLine('dpkg-deb', '-b', extractDir.absolutePath, rebuiltFile.absolutePath)
     }
 
@@ -202,7 +205,6 @@ def linuxDebFromAppImageArgs = { File destDir, File appImageDir ->
             '--app-image', appImageDir.absolutePath,
             '--name', appName,
             '--app-version', project.version.toString(),
-            '--java-options', '-Dfile.encoding=UTF-8',
             '--vendor', appVendor,
             '--linux-shortcut',
             '--linux-package-name', linuxPackageName,
