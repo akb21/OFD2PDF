@@ -106,3 +106,7 @@ src/main/resources/icons/app.png
 第三方依赖 `ofdrw` 的协议文本单独存放于：
 
 [packaging/assets/ofdrw_LICENSE](packaging/assets/ofdrw_LICENSE)
+
+## 界面截图
+
+![应用截图](screenshot.png)
