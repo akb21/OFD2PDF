@@ -10,10 +10,8 @@ import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
-import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
@@ -37,6 +35,8 @@ public class MainView {
     private final CheckBox recursiveScanCheckBox = new CheckBox("递归扫描");
     private final Label summaryLabel = new Label();
     private final Label outputDirectoryLabel = new Label("输出目录：源文件同目录");
+    private final Hyperlink aboutLink = new Hyperlink("关于");
+    private final Hyperlink licenseLink = new Hyperlink("许可");
 
     public MainView(MainController controller) {
         controller.attachView(this);
@@ -63,16 +63,6 @@ public class MainView {
         topBar.setPadding(new Insets(12, 12, 8, 12));
         topBar.setAlignment(Pos.CENTER_LEFT);
 
-        MenuItem aboutMenuItem = new MenuItem("关于");
-        aboutMenuItem.setOnAction(event -> controller.showAboutDialog());
-        MenuItem licenseMenuItem = new MenuItem("许可");
-        licenseMenuItem.setOnAction(event -> controller.showLicenseDialog());
-        Menu helpMenu = new Menu("帮助");
-        helpMenu.getItems().addAll(aboutMenuItem, licenseMenuItem);
-        MenuBar menuBar = new MenuBar(helpMenu);
-
-        VBox topContainer = new VBox(menuBar, topBar);
-
         VBox center = new VBox(12, dropZone, taskTable);
         center.setPadding(new Insets(0, 12, 12, 12));
         VBox.setVgrow(taskTable, Priority.ALWAYS);
@@ -80,9 +70,11 @@ public class MainView {
         BorderPane bottomBar = new BorderPane();
         bottomBar.setPadding(new Insets(0, 12, 12, 12));
         bottomBar.setLeft(summaryLabel);
-        bottomBar.setRight(outputDirectoryLabel);
+        HBox aboutBox = new HBox(8, outputDirectoryLabel, new Label("|"), aboutLink, licenseLink);
+        aboutBox.setAlignment(Pos.CENTER_RIGHT);
+        bottomBar.setRight(aboutBox);
 
-        root.setTop(topContainer);
+        root.setTop(topBar);
         root.setCenter(center);
         root.setBottom(bottomBar);
 
@@ -93,6 +85,8 @@ public class MainView {
         recursiveScanCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> controller.setRecursiveScan(newValue));
         startConversionButton.setOnAction(event -> controller.startConversion());
         openOutputButton.setOnAction(event -> controller.openOutputDirectory());
+        aboutLink.setOnAction(event -> controller.showAboutDialog());
+        licenseLink.setOnAction(event -> controller.showLicenseDialog());
     }
 
     public Parent getRoot() {
