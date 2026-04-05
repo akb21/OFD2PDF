@@ -6,7 +6,7 @@ plugins {
 import org.gradle.process.ExecOperations
 
 group = 'info.akb21'
-version = '0.1.4'
+version = '0.1.5'
 
 def appName = 'ofd2pdf'
 def appDisplayName = 'OFD 转 PDF'
