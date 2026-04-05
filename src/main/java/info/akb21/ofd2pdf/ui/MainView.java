@@ -11,6 +11,9 @@ import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
@@ -60,6 +63,16 @@ public class MainView {
         topBar.setPadding(new Insets(12, 12, 8, 12));
         topBar.setAlignment(Pos.CENTER_LEFT);
 
+        MenuItem aboutMenuItem = new MenuItem("关于");
+        aboutMenuItem.setOnAction(event -> controller.showAboutDialog());
+        MenuItem licenseMenuItem = new MenuItem("许可");
+        licenseMenuItem.setOnAction(event -> controller.showLicenseDialog());
+        Menu helpMenu = new Menu("帮助");
+        helpMenu.getItems().addAll(aboutMenuItem, licenseMenuItem);
+        MenuBar menuBar = new MenuBar(helpMenu);
+
+        VBox topContainer = new VBox(menuBar, topBar);
+
         VBox center = new VBox(12, dropZone, taskTable);
         center.setPadding(new Insets(0, 12, 12, 12));
         VBox.setVgrow(taskTable, Priority.ALWAYS);
@@ -69,7 +82,7 @@ public class MainView {
         bottomBar.setLeft(summaryLabel);
         bottomBar.setRight(outputDirectoryLabel);
 
-        root.setTop(topBar);
+        root.setTop(topContainer);
         root.setCenter(center);
         root.setBottom(bottomBar);
 

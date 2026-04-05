@@ -96,6 +96,12 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+tasks.named('processResources') {
+    filesMatching('app.properties') {
+        expand(version: project.version.toString())
+    }
+}
+
 def toUnicodeEscapedPropertiesValue = { String value ->
     value.collect { ch ->
         int codePoint = (int) ch
