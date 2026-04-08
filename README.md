@@ -4,7 +4,7 @@
 
 项目基于 [`ofdrw`](https://github.com/ofdrw/ofdrw) + JavaFX，提供已经打包好的安装程序，普通用户安装后即可直接使用，不需要自己配置 Java 环境。
 
-![应用截图](screenshot.png)
+![应用截图](Screenshot.png)
 
 ## 适合谁用
 
