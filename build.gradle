@@ -368,6 +368,7 @@ tasks.register('packageWindows', Exec) {
                 '--java-options', '-Dfile.encoding=UTF-8',
                 '--vendor', appVendor,
                 '--resource-dir', windowsResourceDir.get().asFile.absolutePath,
+                '--win-dir-chooser',
                 '--win-shortcut',
                 '--win-menu',
                 '--win-menu-group', windowsMenuGroup,
