@@ -15,9 +15,12 @@ def appDescription = '桌面版 OFD 转 PDF 工具'
 def windowsMenuGroup = 'AKB21'
 def linuxPackageName = 'ofd2pdf'
 def linuxAppCategory = 'Office'
+def currentOs = org.gradle.internal.os.OperatingSystem.current()
+def isWindows = currentOs.isWindows()
+def isLinux = currentOs.isLinux()
 def packageDate = new Date().format('yyyyMMdd')
-def packagePlatform = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'windows'
-        : org.gradle.internal.os.OperatingSystem.current().isLinux() ? 'linux'
+def packagePlatform = isWindows ? 'windows'
+        : isLinux ? 'linux'
         : 'unknown'
 def packageArch = {
     def arch = System.getProperty('os.arch', '').toLowerCase(Locale.ROOT)
@@ -181,50 +184,59 @@ def normalizeDebPackageDependencies = { File debFile ->
     }
 }
 
-def linuxAppImageArgs = { File destDir, String runtimeModules ->
-    def args = [
+def baseJpackageAppArgs = { String packageType ->
+    [
             'jpackage',
-            '--type', 'app-image',
-            '--dest', destDir.absolutePath,
-            '--input', packageInputDir.get().asFile.absolutePath,
+            '--type', packageType,
             '--name', appName,
             '--app-version', project.version.toString(),
-            '--main-jar', mainJarName,
-            '--main-class', application.mainClass.get(),
-            '--java-options', '-Dfile.encoding=UTF-8',
             '--vendor', appVendor,
-            '--description', appDescription,
-            '--add-modules', runtimeModules,
-            '--jlink-options', jpackageJlinkOptions
+            '--description', appDescription
     ]
-    if (linuxIconFile.exists()) {
-        args += ['--icon', linuxIconFile.absolutePath]
+}
+
+def addIconIfPresent = { List<String> args, File iconFile ->
+    if (iconFile.exists()) {
+        args += ['--icon', iconFile.absolutePath]
     }
     args
 }
 
+def linuxAppImageArgs = { File destDir, String runtimeModules ->
+    def args = baseJpackageAppArgs('app-image') + [
+            '--dest', destDir.absolutePath,
+            '--input', packageInputDir.get().asFile.absolutePath,
+            '--main-jar', mainJarName,
+            '--main-class', application.mainClass.get(),
+            '--java-options', '-Dfile.encoding=UTF-8',
+            '--add-modules', runtimeModules,
+            '--jlink-options', jpackageJlinkOptions
+    ]
+    addIconIfPresent(args, linuxIconFile)
+}
+
 def linuxDebFromAppImageArgs = { File destDir, File appImageDir ->
-    def args = [
-            'jpackage',
-            '--type', 'deb',
+    def args = baseJpackageAppArgs('deb') + [
             '--dest', destDir.absolutePath,
             '--app-image', appImageDir.absolutePath,
-            '--name', appName,
-            '--app-version', project.version.toString(),
-            '--vendor', appVendor,
             '--linux-shortcut',
             '--linux-package-name', linuxPackageName,
-            '--linux-app-category', linuxAppCategory,
-            '--description', appDescription
+            '--linux-app-category', linuxAppCategory
     ]
-    if (linuxIconFile.exists()) {
-        args += ['--icon', linuxIconFile.absolutePath]
-    }
-    args
+    addIconIfPresent(args, linuxIconFile)
 }
 
 def locateAppImage = { File baseDir ->
     baseDir.listFiles()?.findAll { it.directory && it.name.startsWith(appName) }?.max { it.lastModified() }
+}
+
+def renamePackagedArtifact = { File originalFile, File renamedFile ->
+    if (!originalFile.exists() || originalFile.equals(renamedFile)) {
+        return
+    }
+    if (!originalFile.renameTo(renamedFile)) {
+        throw new GradleException("Failed to rename ${originalFile.name} to ${renamedFile.name}")
+    }
 }
 
 tasks.named('jar') {
@@ -232,6 +244,8 @@ tasks.named('jar') {
 }
 
 tasks.register('prepareJpackageInput', Sync) {
+    group = 'distribution'
+    description = 'Collect application jars and bundled licenses for jpackage.'
     dependsOn tasks.named('jar')
     from(tasks.named('jar'))
     from(configurations.runtimeClasspath) {
@@ -286,7 +300,7 @@ tasks.register('packageAppImage', Exec) {
     description = 'Build a Linux app image that bundles the runtime.'
     dependsOn tasks.named('calculateRuntimeModules')
     onlyIf {
-        org.gradle.internal.os.OperatingSystem.current().isLinux()
+        isLinux
     }
 
     doFirst {
@@ -349,45 +363,35 @@ tasks.register('packageWindows', Exec) {
     description = 'Build a Windows installer with jpackage.'
     dependsOn tasks.named('calculateRuntimeModules'), tasks.named('prepareWindowsJpackageResources')
     onlyIf {
-        org.gradle.internal.os.OperatingSystem.current().isWindows()
+        isWindows
     }
 
     doFirst {
         def outputDir = packageDestDir.get().asFile
         def runtimeModules = runtimeModulesFile.get().asFile.text.trim()
         outputDir.mkdirs()
-        commandLine(
-                'jpackage',
-                '--type', 'exe',
+        def args = baseJpackageAppArgs('exe') + [
                 '--dest', outputDir.absolutePath,
                 '--input', packageInputDir.get().asFile.absolutePath,
-                '--name', appName,
-                '--app-version', project.version.toString(),
                 '--main-jar', mainJarName,
                 '--main-class', application.mainClass.get(),
                 '--java-options', '-Dfile.encoding=UTF-8',
-                '--vendor', appVendor,
                 '--resource-dir', windowsResourceDir.get().asFile.absolutePath,
                 '--win-dir-chooser',
                 '--win-shortcut',
                 '--win-menu',
                 '--win-menu-group', windowsMenuGroup,
-                '--description', appDescription,
                 '--add-modules', runtimeModules,
                 '--jlink-options', jpackageJlinkOptions
-        )
-        if (windowsIconFile.exists()) {
-            commandLine += ['--icon', windowsIconFile.absolutePath]
-        }
+        ]
+        commandLine(addIconIfPresent(args, windowsIconFile))
     }
 
     doLast {
         def outputDir = packageDestDir.get().asFile
         def originalFile = new File(outputDir, "${appName}-${project.version}.exe")
         def renamedFile = new File(outputDir, "${appName}-${project.version}-${packagePlatform}-${packageArch}-${packageDate}.exe")
-        if (originalFile.exists() && !originalFile.equals(renamedFile)) {
-            originalFile.renameTo(renamedFile)
-        }
+        renamePackagedArtifact(originalFile, renamedFile)
     }
 }
 
@@ -397,7 +401,7 @@ tasks.register('packageDeb', Exec) {
     dependsOn tasks.named('calculateRuntimeModules')
     dependsOn tasks.named('packageAppImage')
     onlyIf {
-        org.gradle.internal.os.OperatingSystem.current().isLinux()
+        isLinux
     }
 
     doFirst {
@@ -416,9 +420,7 @@ tasks.register('packageDeb', Exec) {
         candidates.each { file ->
             def renamed = "${appName}-${project.version}-${packagePlatform}-${packageArch}-${packageDate}.deb"
             def renamedFile = new File(outputDir, renamed)
-            if (!file.equals(renamedFile)) {
-                file.renameTo(renamedFile)
-            }
+            renamePackagedArtifact(file, renamedFile)
         }
 
         def normalizedCandidates = outputDir.listFiles()?.findAll { file -> file.name.endsWith('.deb') } ?: []
