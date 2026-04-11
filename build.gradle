@@ -38,6 +38,7 @@ def packageDestDir = layout.buildDirectory.dir('jpackage/package')
 def noRuntimeDestDir = layout.buildDirectory.dir('package-no-runtime')
 def runtimeModulesFile = layout.buildDirectory.file('jpackage/runtime-modules.txt')
 def windowsResourceDir = layout.buildDirectory.dir('jpackage/windows-resources')
+def windowsInstallerLocaleArgs = ['-J-Duser.language=zh', '-J-Duser.country=CN']
 def windowsIconFile = layout.projectDirectory.file('packaging/assets/app.ico').asFile
 def linuxIconFile = layout.projectDirectory.file('packaging/assets/app.png').asFile
 def linuxAppImageDir = layout.buildDirectory.dir('jpackage/app-image')
@@ -370,7 +371,7 @@ tasks.register('packageWindows', Exec) {
         def outputDir = packageDestDir.get().asFile
         def runtimeModules = runtimeModulesFile.get().asFile.text.trim()
         outputDir.mkdirs()
-        def args = baseJpackageAppArgs('exe') + [
+        def args = windowsInstallerLocaleArgs + baseJpackageAppArgs('exe') + [
                 '--dest', outputDir.absolutePath,
                 '--input', packageInputDir.get().asFile.absolutePath,
                 '--main-jar', mainJarName,
